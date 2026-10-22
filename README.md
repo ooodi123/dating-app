@@ -32,12 +32,11 @@ cd ../webapp && npm install && npm run dev   # http://localhost:5173/?dev=1
 3. В @BotFather: `/newapp` (или Menu Button) → тот же URL.
 4. Для AI добавьте `ANTHROPIC_API_KEY`. Модель задаётся `AI_MODEL` (по умолчанию `claude-opus-5-5`;
    для экономии на большом трафике можно поставить `claude-haiku-5-5`).
+5. Укажите свой Telegram id в `ADMIN_IDS` (узнать можно у @userinfobot): туда придут жалобы и заявки
+   на верификацию с кнопками «Забанить» / «Подтвердить».
 
 Оплата Stars не требует платёжного провайдера: бот создаёт invoice link с валютой `XTR`, мини-апп открывает
 его через `Telegram.WebApp.openInvoice`, а начисление происходит по `successful_payment` в боте.
-
-5. Укажите свой Telegram id в `ADMIN_IDS` (узнать можно у @userinfobot): туда придут жалобы и заявки
-   на верификацию с кнопками «Забанить» / «Подтвердить».
 
 ## Модерация и доверие
 - AI проверяет текст анкеты, фото и подозрительные сообщения. Без `ANTHROPIC_API_KEY` проверки
