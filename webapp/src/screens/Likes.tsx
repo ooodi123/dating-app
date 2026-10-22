@@ -24,7 +24,7 @@ export function Likes({ onPremium }: { onPremium: () => void }) {
           "id" in l ? (
             <div key={l.id} className="tile">
               <Avatar user={l} />
-              <div className="tile-name">{l.super && "⭐ "}{l.name}, {l.age}</div>
+              <div className="tile-name">{l.super && "⭐ "}{l.name}, {l.age} {l.verified && "✓"}</div>
             </div>
           ) : (
             <div key={i} className="tile locked" onClick={onPremium}>

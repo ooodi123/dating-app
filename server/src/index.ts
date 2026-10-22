@@ -20,6 +20,7 @@ await app.register(routes);
 await app.listen({ port: config.port, host: "0.0.0.0" });
 
 if (config.botToken) {
+  await bot.init();
   void bot.start({ onStart: (me) => app.log.info(`Bot @${me.username} started`) });
 } else {
   app.log.warn("BOT_TOKEN не задан: бот и оплата отключены");

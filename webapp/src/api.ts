@@ -9,6 +9,7 @@ export interface Profile {
   interests: string[];
   photos: string[];
   premium: boolean;
+  verified: boolean;
 }
 
 export interface Me extends Profile {
@@ -20,6 +21,7 @@ export interface Me extends Profile {
   premiumUntil: number;
   superLikes: number;
   boostUntil: number;
+  verifyStatus: "none" | "pending" | "verified" | "rejected";
 }
 
 export interface Card extends Profile {
@@ -37,6 +39,7 @@ export interface MeResponse {
   me: Me;
   limits: { likesLeft: number | null; aiEnabled: boolean };
   products: Record<string, Product>;
+  invite: { link: string | null; friends: number; superLikesBonus: number; premiumEvery: number; premiumDays: number };
 }
 
 export interface Message {
@@ -47,7 +50,7 @@ export interface Message {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string) {
+  constructor(public status: number, public code: string, public reason?: string) {
     super(code);
   }
 }
@@ -66,7 +69,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? "unknown");
+  if (!res.ok) throw new ApiError(res.status, data.error ?? "unknown", data.reason);
   return data as T;
 }
 
@@ -76,6 +79,10 @@ export const AI_ERRORS: Record<string, string> = {
 };
 
 export function errorText(e: unknown) {
-  if (e instanceof ApiError) return AI_ERRORS[e.code] ?? `Ошибка: ${e.code}`;
+  if (e instanceof ApiError) {
+    if (e.code === "moderation") return `Не прошло модерацию: ${e.reason || "нарушение правил"}`;
+    if (e.code === "selfie_rejected") return `Селфи не подошло: ${e.reason || "попробуй ещё раз"}`;
+    return AI_ERRORS[e.code] ?? `Ошибка: ${e.code}`;
+  }
   return "Что-то пошло не так";
 }

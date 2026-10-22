@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { config } from "./config.js";
 import { db, getUser, now, type UserRow } from "./db.js";
+import { parseRef, setReferrer } from "./referrals.js";
 
 const MAX_AGE_SEC = 24 * 60 * 60;
 
@@ -15,7 +16,7 @@ interface TgUser {
  * Проверка initData по алгоритму Telegram:
  * secret = HMAC_SHA256(key="WebAppData", botToken); hash = HMAC_SHA256(secret, data_check_string).
  */
-export function validateInitData(initData: string): TgUser | null {
+export function validateInitData(initData: string): { user: TgUser; startParam: string | null } | null {
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
   if (!hash || !config.botToken) return null;
@@ -33,15 +34,17 @@ export function validateInitData(initData: string): TgUser | null {
   if (!authDate || Date.now() / 1000 - authDate > MAX_AGE_SEC) return null;
 
   const raw = params.get("user");
-  return raw ? (JSON.parse(raw) as TgUser) : null;
+  return raw ? { user: JSON.parse(raw) as TgUser, startParam: params.get("start_param") } : null;
 }
 
-function upsertUser(tg: TgUser): UserRow {
+export function upsertUser(tg: TgUser, startParam?: string | null): UserRow {
   const t = now();
   db.prepare(
     `INSERT INTO users (id, username, name, created_at, last_active) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET username = excluded.username, last_active = excluded.last_active`,
   ).run(tg.id, tg.username ?? null, tg.first_name, t, t);
+  // Приглашение через ссылку t.me/<bot>/<app>?startapp=ref_<id>
+  if (startParam) setReferrer(tg.id, parseRef(startParam));
   return getUser(tg.id)!;
 }
 
@@ -50,8 +53,8 @@ export function authenticate(req: FastifyRequest): UserRow | null {
   const header = req.headers.authorization ?? "";
   const [scheme, value = ""] = header.split(" ", 2);
   if (scheme === "tma") {
-    const tg = validateInitData(header.slice(4));
-    return tg ? upsertUser(tg) : null;
+    const data = validateInitData(header.slice(4));
+    return data ? upsertUser(data.user, data.startParam) : null;
   }
   if (scheme === "dev" && config.devAuth) {
     const id = Number(value);

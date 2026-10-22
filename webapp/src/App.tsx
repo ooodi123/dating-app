@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type MeResponse } from "./api";
+import { api, ApiError, type MeResponse } from "./api";
 import { Feed } from "./screens/Feed";
 import { Likes } from "./screens/Likes";
 import { Matches } from "./screens/Matches";
@@ -18,14 +18,15 @@ const TABS: { id: Tab; icon: string; label: string }[] = [
 
 export function App() {
   const [state, setState] = useState<MeResponse | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<"auth" | "banned" | null>(null);
   const [tab, setTab] = useState<Tab>("feed");
   const [chatId, setChatId] = useState<number | null>(null);
   const [premiumOpen, setPremiumOpen] = useState(false);
 
-  const reload = useCallback(() => api<MeResponse>("/api/me").then(setState).catch(() => setError(true)), []);
+  const reload = useCallback(() => api<MeResponse>("/api/me").then(setState).catch((e) => setError(e instanceof ApiError && e.code === "banned" ? "banned" : "auth")), []);
   useEffect(() => void reload(), [reload]);
 
+  if (error === "banned") return <div className="center">Анкета заблокирована модераторами за нарушение правил. Если это ошибка, напиши боту /paysupport.</div>;
   if (error) return <div className="center">Не удалось войти. Открой приложение через бота в Telegram.</div>;
   if (!state) return <div className="center">Загрузка…</div>;
 
