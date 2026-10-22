@@ -4,7 +4,8 @@ import { z } from "zod";
 import { config } from "./config.js";
 import { db, isPremium, today, type UserRow } from "./db.js";
 
-const client = new Anthropic();
+// Клиент Claude нужен только для провайдера anthropic
+const client = new Anthropic({ apiKey: config.ai.provider === "anthropic" ? config.ai.apiKey : "unused" });
 
 const SYSTEM = `Ты — тёплый и остроумный AI-помощник в приложении знакомств внутри Telegram.
 Пиши по-русски, живо и естественно, без клише и пошлости. Не выдумывай факты о людях сверх их анкет.
@@ -39,15 +40,31 @@ function consumeAiQuota(u: UserRow) {
 
 class AiRefusalError extends AiUnavailableError {}
 
-type Content = Anthropic.Beta.Messages.BetaContentBlockParam[];
+/** Части запроса, не зависящие от провайдера. */
+type Part = { type: "text"; text: string } | { type: "image"; jpegBase64: string };
+type Content = Part[];
 
 async function structured<S extends z.ZodType>(schema: S, prompt: string | Content, system = SYSTEM): Promise<z.infer<S>> {
   if (!config.aiEnabled) throw new AiUnavailableError();
+  const parts: Content = typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt;
+  return config.ai.provider === "anthropic"
+    ? structuredClaude(schema, parts, system)
+    : structuredOpenAiCompatible(schema, parts, system);
+}
+
+async function structuredClaude<S extends z.ZodType>(schema: S, parts: Content, system: string): Promise<z.infer<S>> {
   const res = await client.beta.messages.parse({
     model: config.aiModel,
     max_tokens: 4000,
     system,
-    messages: [{ role: "user", content: prompt }],
+    messages: [{
+      role: "user",
+      content: parts.map((p) =>
+        p.type === "text"
+          ? { type: "text" as const, text: p.text }
+          : { type: "image" as const, source: { type: "base64" as const, media_type: "image/jpeg" as const, data: p.jpegBase64 } },
+      ),
+    }],
     output_config: { effort: "low", format: betaZodOutputFormat(schema) },
     // При отказе модели запрос автоматически повторяется на резервной модели
     betas: ["server-side-fallback-2026-07-01"],
@@ -56,6 +73,72 @@ async function structured<S extends z.ZodType>(schema: S, prompt: string | Conte
   if (res.stop_reason === "refusal") throw new AiRefusalError();
   if (!res.parsed_output) throw new AiUnavailableError();
   return res.parsed_output;
+}
+
+/**
+ * Gemini, OpenRouter, Groq и др. через OpenAI-совместимый /chat/completions.
+ * Схему ответа описываем в промпте и просим JSON; результат проверяем zod-схемой.
+ */
+async function structuredOpenAiCompatible<S extends z.ZodType>(schema: S, parts: Content, system: string): Promise<z.infer<S>> {
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema));
+  const body = {
+    model: config.aiModel,
+    // С запасом: у «думающих» моделей (Gemini Flash) рассуждения тоже входят в лимит
+    max_tokens: 4000,
+    messages: [
+      { role: "system", content: `${system}\n\nОтвечай только одним JSON-объектом по этой JSON Schema, без пояснений и markdown:\n${jsonSchema}` },
+      {
+        role: "user",
+        content: parts.map((p) =>
+          p.type === "text"
+            ? { type: "text", text: p.text }
+            : { type: "image_url", image_url: { url: `data:image/jpeg;base64,${p.jpegBase64}` } },
+        ),
+      },
+    ],
+  };
+
+  const call = (withJsonMode: boolean) =>
+    fetch(`${config.ai.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.ai.apiKey}`,
+        // OpenRouter показывает приложение в своей статистике по этим заголовкам
+        ...(config.ai.provider === "openrouter" && config.webAppUrl ? { "HTTP-Referer": config.webAppUrl, "X-Title": "Dating Mini App" } : {}),
+      },
+      body: JSON.stringify(withJsonMode ? { ...body, response_format: { type: "json_object" } } : body),
+      signal: AbortSignal.timeout(60_000),
+    });
+
+  let res = await call(true);
+  // Не все бесплатные модели умеют JSON-режим — тогда просим JSON только словами
+  if (res.status === 400) res = await call(false);
+  if (!res.ok) {
+    console.error(`AI ${config.ai.provider} ответил ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    throw new AiUnavailableError();
+  }
+  const data = (await res.json()) as { choices?: { message?: { content?: string | null }; finish_reason?: string }[] };
+  const choice = data.choices?.[0];
+  if (choice?.finish_reason === "content_filter") throw new AiRefusalError();
+  const parsed = schema.safeParse(extractJson(choice?.message?.content ?? ""));
+  if (!parsed.success) {
+    console.error("AI вернул ответ не по схеме", choice?.message?.content?.slice(0, 300));
+    throw new AiUnavailableError();
+  }
+  return parsed.data;
+}
+
+/** Достаёт JSON-объект из ответа модели, даже если он обёрнут в ```json или текст. */
+function extractJson(text: string): unknown {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
 }
 
 const BiosSchema = z.object({ bios: z.array(z.string()) });
@@ -167,8 +250,8 @@ export function moderateChatMessage(text: string) {
 <content>${text}</content>`);
 }
 
-function imageBlock(jpegBase64: string): Anthropic.Beta.Messages.BetaContentBlockParam {
-  return { type: "image", source: { type: "base64", media_type: "image/jpeg", data: jpegBase64 } };
+function imageBlock(jpegBase64: string): Part {
+  return { type: "image", jpegBase64 };
 }
 
 export function moderatePhoto(jpegBase64: string) {
