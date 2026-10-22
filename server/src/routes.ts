@@ -3,17 +3,35 @@ import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { AiLimitError, AiUnavailableError, compatibility, generateBios, generateIcebreakers } from "./ai.js";
+import {
+  AiLimitError, AiUnavailableError, GESTURES, checkSelfie, compatibility, generateBios, generateIcebreakers,
+  moderateChatMessage, moderatePhoto, moderateProfileText,
+} from "./ai.js";
 import { authenticate } from "./auth.js";
-import { createInvoiceLink, notify } from "./bot.js";
+import { createInvoiceLink, inviteLink, notify, reportToAdmins, verificationToAdmins } from "./bot.js";
 import { config } from "./config.js";
 import {
-  db, getUser, isPremium, now, pairKey, privateProfile, publicProfile, startOfDay, type UserRow,
+  VISIBLE_TO_ME, db, getUser, isBlockedBetween, isPremium, now, pairKey, privateProfile, publicProfile, startOfDay,
+  type UserRow,
 } from "./db.js";
 import { PRODUCTS, isProduct } from "./payments.js";
+import { referralCount, rewardReferral } from "./referrals.js";
 
 const MAX_PHOTOS = 6;
+// После стольких заблокированных сообщений на пользователя автоматически уходит жалоба модераторам
+const STRIKES_TO_REPORT = 3;
 mkdirSync(config.uploadsDir, { recursive: true });
+// Селфи для верификации не раздаются статикой: их видят только модераторы в боте
+mkdirSync(config.selfiesDir, { recursive: true });
+
+const REPORT_REASONS = {
+  fake: "Фейк / чужие фото",
+  scam: "Мошенничество / просит деньги",
+  offensive: "Оскорбления",
+  underage: "Младше 18",
+  spam: "Спам / реклама",
+  other: "Другое",
+} as const;
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -32,6 +50,23 @@ function matchFor(matchId: number, userId: number) {
     | undefined;
   if (!m || (m.user_a !== userId && m.user_b !== userId)) return null;
   return { ...m, otherId: m.user_a === userId ? m.user_b : m.user_a };
+}
+
+/** Жалоба: сохраняем, блокируем для автора и при нескольких жалобах скрываем анкету до решения модератора. */
+function fileReport(fromId: number, targetId: number, reason: keyof typeof REPORT_REASONS, comment: string) {
+  db.prepare(
+    "INSERT OR IGNORE INTO reports (from_id, to_id, reason, comment, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(fromId, targetId, reason, comment, now());
+  const { n } = db.prepare("SELECT COUNT(DISTINCT from_id) AS n FROM reports WHERE to_id = ?").get(targetId) as { n: number };
+  const autoBanned = n >= config.autoBanReports;
+  if (autoBanned) db.prepare("UPDATE users SET banned = 1 WHERE id = ?").run(targetId);
+  const target = getUser(targetId)!;
+  void reportToAdmins(
+    targetId,
+    `Жалоба на ${target.name}, ${target.age} (id ${targetId}): ${REPORT_REASONS[reason]}` +
+      `${comment ? `\n«${comment}»` : ""}\nВсего жалоб: ${n}`,
+    autoBanned,
+  );
 }
 
 function likesToday(userId: number) {
@@ -67,6 +102,7 @@ export async function routes(app: FastifyInstance) {
   app.addHook("preHandler", async (req, reply) => {
     const user = authenticate(req);
     if (!user) return fail(reply, 401, "unauthorized");
+    if (user.banned) return fail(reply, 403, "banned");
     req.user = user;
   });
 
@@ -77,17 +113,30 @@ export async function routes(app: FastifyInstance) {
       aiEnabled: config.aiEnabled,
     },
     products: PRODUCTS,
+    invite: {
+      link: inviteLink(req.user.id),
+      friends: referralCount(req.user.id),
+      superLikesBonus: config.referralSuperLikes,
+      premiumEvery: config.referralPremiumEvery,
+      premiumDays: config.referralPremiumDays,
+    },
   }));
 
   app.put("/api/me", async (req, reply) => {
     const body = ProfileUpdate.safeParse(req.body);
     if (!body.success) return fail(reply, 400, "invalid_profile");
     const p = body.data;
+    const mod = await moderateProfileText(p.name, p.bio, p.city);
+    if (!mod.allowed) return reply.code(422).send({ error: "moderation", reason: mod.reason });
     db.prepare(
       `UPDATE users SET name = ?, age = ?, gender = ?, looking_for = ?, age_min = ?, age_max = ?,
          city = ?, bio = ?, interests = ?, onboarded = 1 WHERE id = ?`,
     ).run(p.name, p.age, p.gender, p.lookingFor, Math.min(p.ageMin, p.ageMax), Math.max(p.ageMin, p.ageMax),
       p.city, p.bio, JSON.stringify(p.interests), req.user.id);
+    if (!req.user.onboarded) {
+      const reward = rewardReferral(req.user.id);
+      if (reward) void notify(reward.referrerId, reward.text);
+    }
     return { me: privateProfile(getUser(req.user.id)!) };
   });
 
@@ -97,6 +146,8 @@ export async function routes(app: FastifyInstance) {
     if (!m) return fail(reply, 400, "invalid_photo");
     const photos = JSON.parse(req.user.photos) as string[];
     if (photos.length >= MAX_PHOTOS) return fail(reply, 400, "too_many_photos");
+    const mod = await moderatePhoto(m[1]);
+    if (!mod.allowed) return reply.code(422).send({ error: "moderation", reason: mod.reason });
     const file = `${randomUUID()}.jpg`;
     writeFileSync(join(config.uploadsDir, file), Buffer.from(m[1], "base64"));
     photos.push(`/uploads/${file}`);
@@ -121,12 +172,12 @@ export async function routes(app: FastifyInstance) {
       `SELECT u.*,
          EXISTS (SELECT 1 FROM swipes s WHERE s.from_id = u.id AND s.to_id = :me AND s.kind = 'super') AS super_liked_me
        FROM users u
-       WHERE u.id != :me AND u.onboarded = 1
+       WHERE u.id != :me AND u.onboarded = 1 AND ${VISIBLE_TO_ME}
          AND (:lf = 'any' OR u.gender = :lf)
          AND (u.looking_for = 'any' OR u.looking_for = :g)
          AND u.age BETWEEN :amin AND :amax
          AND u.id NOT IN (SELECT to_id FROM swipes WHERE from_id = :me)
-       ORDER BY (u.boost_until > :t) DESC, super_liked_me DESC, u.last_active DESC
+       ORDER BY (u.boost_until > :t) DESC, super_liked_me DESC, (u.verify_status = 'verified') DESC, u.last_active DESC
        LIMIT 20`,
     ).all({ me: me.id, lf: me.looking_for, g: me.gender, amin: me.age_min, amax: me.age_max, t }) as unknown as
       (UserRow & { super_liked_me: number })[];
@@ -150,7 +201,9 @@ export async function routes(app: FastifyInstance) {
     const { targetId, kind } = body.data;
     const me = req.user;
     const target = getUser(targetId);
-    if (!target || target.id === me.id) return fail(reply, 404, "not_found");
+    if (!target || target.id === me.id || target.banned || isBlockedBetween(me.id, target.id)) {
+      return fail(reply, 404, "not_found");
+    }
 
     if (kind !== "pass" && !isPremium(me) && likesToday(me.id) >= config.freeDailyLikes) {
       return fail(reply, 402, "likes_limit");
@@ -180,10 +233,10 @@ export async function routes(app: FastifyInstance) {
   app.get("/api/likes", async (req) => {
     const rows = db.prepare(
       `SELECT u.*, s.kind FROM swipes s JOIN users u ON u.id = s.from_id
-       WHERE s.to_id = ? AND s.kind != 'pass'
-         AND s.from_id NOT IN (SELECT to_id FROM swipes WHERE from_id = ?)
+       WHERE s.to_id = :me AND s.kind != 'pass' AND ${VISIBLE_TO_ME}
+         AND s.from_id NOT IN (SELECT to_id FROM swipes WHERE from_id = :me)
        ORDER BY s.created_at DESC LIMIT 50`,
-    ).all(req.user.id, req.user.id) as unknown as (UserRow & { kind: string })[];
+    ).all({ me: req.user.id }) as unknown as (UserRow & { kind: string })[];
     const premium = isPremium(req.user);
     return {
       count: rows.length,
@@ -200,7 +253,8 @@ export async function routes(app: FastifyInstance) {
       `SELECT m.id, m.created_at, CASE WHEN m.user_a = :me THEN m.user_b ELSE m.user_a END AS other_id,
          (SELECT text FROM messages WHERE match_id = m.id ORDER BY id DESC LIMIT 1) AS last_text,
          (SELECT created_at FROM messages WHERE match_id = m.id ORDER BY id DESC LIMIT 1) AS last_at
-       FROM matches m WHERE m.user_a = :me OR m.user_b = :me
+       FROM matches m JOIN users u ON u.id = CASE WHEN m.user_a = :me THEN m.user_b ELSE m.user_a END
+       WHERE (m.user_a = :me OR m.user_b = :me) AND ${VISIBLE_TO_ME}
        ORDER BY COALESCE(last_at, m.created_at) DESC`,
     ).all({ me: req.user.id }) as { id: number; other_id: number; last_text: string | null; created_at: number }[];
     return {
@@ -210,7 +264,7 @@ export async function routes(app: FastifyInstance) {
 
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>("/api/matches/:id/messages", async (req, reply) => {
     const m = matchFor(Number(req.params.id), req.user.id);
-    if (!m) return fail(reply, 404, "not_found");
+    if (!m || isBlockedBetween(m.user_a, m.user_b)) return fail(reply, 404, "not_found");
     const messages = db
       .prepare("SELECT id, sender_id AS senderId, text, created_at AS createdAt FROM messages WHERE match_id = ? AND id > ? ORDER BY id LIMIT 200")
       .all(m.id, Number(req.query.after ?? 0));
@@ -220,12 +274,81 @@ export async function routes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>("/api/matches/:id/messages", async (req, reply) => {
     const m = matchFor(Number(req.params.id), req.user.id);
     const body = z.object({ text: z.string().trim().min(1).max(2000) }).safeParse(req.body);
-    if (!m) return fail(reply, 404, "not_found");
+    if (!m || isBlockedBetween(m.user_a, m.user_b) || getUser(m.otherId)?.banned) return fail(reply, 404, "not_found");
     if (!body.success) return fail(reply, 400, "invalid_message");
+    const mod = await moderateChatMessage(body.data.text);
+    if (!mod.allowed) {
+      const { strikes } = db.prepare("UPDATE users SET strikes = strikes + 1 WHERE id = ? RETURNING strikes").get(req.user.id) as { strikes: number };
+      if (strikes === STRIKES_TO_REPORT) {
+        void reportToAdmins(req.user.id, `AI заблокировал ${strikes} сообщения от ${req.user.name} (id ${req.user.id}). Последнее: «${body.data.text.slice(0, 300)}»`, false);
+      }
+      return reply.code(422).send({ error: "moderation", reason: mod.reason });
+    }
     const res = db.prepare("INSERT INTO messages (match_id, sender_id, text, created_at) VALUES (?, ?, ?, ?)")
       .run(m.id, req.user.id, body.data.text, now());
     void notify(m.otherId, `${req.user.name}: ${body.data.text.slice(0, 100)}`);
     return { id: Number(res.lastInsertRowid) };
+  });
+
+  app.post("/api/block", async (req, reply) => {
+    const body = z.object({ targetId: z.number().int() }).safeParse(req.body);
+    if (!body.success || body.data.targetId === req.user.id) return fail(reply, 400, "invalid_request");
+    db.prepare("INSERT OR IGNORE INTO blocks (from_id, to_id, created_at) VALUES (?, ?, ?)").run(req.user.id, body.data.targetId, now());
+    return { ok: true };
+  });
+
+  app.post("/api/report", async (req, reply) => {
+    const body = z.object({
+      targetId: z.number().int(),
+      reason: z.enum(Object.keys(REPORT_REASONS) as [keyof typeof REPORT_REASONS]),
+      comment: z.string().trim().max(500).default(""),
+    }).safeParse(req.body);
+    if (!body.success || body.data.targetId === req.user.id || !getUser(body.data.targetId)) {
+      return fail(reply, 400, "invalid_request");
+    }
+    const { targetId, reason, comment } = body.data;
+    db.prepare("INSERT OR IGNORE INTO blocks (from_id, to_id, created_at) VALUES (?, ?, ?)").run(req.user.id, targetId, now());
+    fileReport(req.user.id, targetId, reason, comment);
+    return { ok: true };
+  });
+
+  app.get("/api/verify", async (req) => {
+    // Жест назначаем сервером, чтобы нельзя было подсунуть старое фото
+    let gesture = req.user.verify_gesture;
+    if (!gesture || req.user.verify_status === "rejected") {
+      gesture = GESTURES[Math.floor(Math.random() * GESTURES.length)];
+      db.prepare("UPDATE users SET verify_gesture = ? WHERE id = ?").run(gesture, req.user.id);
+    }
+    return { status: req.user.verify_status, gesture };
+  });
+
+  app.post("/api/verify", { bodyLimit: 3 * 1024 * 1024 }, async (req, reply) => {
+    const u = req.user;
+    if (u.verify_status === "verified" || u.verify_status === "pending") return fail(reply, 409, "already_" + u.verify_status);
+    if (!u.verify_gesture) return fail(reply, 400, "no_gesture");
+    if ((JSON.parse(u.photos) as string[]).length === 0) return fail(reply, 400, "no_photos");
+    const body = z.object({ dataUrl: z.string() }).safeParse(req.body);
+    const m = body.success && /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(body.data.dataUrl);
+    if (!m) return fail(reply, 400, "invalid_photo");
+
+    let check: { ok: boolean; reason: string };
+    try {
+      check = await checkSelfie(m[1], u.verify_gesture);
+    } catch (e) {
+      if (!(e instanceof AiUnavailableError)) throw e;
+      // AI недоступен: если есть модераторы, отправляем им на ручную проверку
+      if (!config.adminIds.length) return fail(reply, 503, "ai_unavailable");
+      check = { ok: true, reason: "" };
+    }
+    if (!check.ok) return reply.code(422).send({ error: "selfie_rejected", reason: check.reason });
+
+    const path = join(config.selfiesDir, `${u.id}-${randomUUID()}.jpg`);
+    writeFileSync(path, Buffer.from(m[1], "base64"));
+    // Без модераторов полагаемся на AI-проверку; с модераторами — финальное решение за человеком
+    const status = config.adminIds.length ? "pending" : "verified";
+    db.prepare("UPDATE users SET verify_status = ?, verify_selfie = ? WHERE id = ?").run(status, path, u.id);
+    if (status === "pending") void verificationToAdmins(u.id, path, u.verify_gesture);
+    return { status };
   });
 
   app.post("/api/ai/bio", async (req, reply) => {

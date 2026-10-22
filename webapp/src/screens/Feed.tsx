@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorText, type Card, type MeResponse, type Profile } from "../api";
 import { haptic } from "../tg";
 import { Avatar } from "./Avatar";
+import { ReportSheet } from "./ReportSheet";
 
 interface Props {
   state: MeResponse;
@@ -17,6 +18,7 @@ export function Feed({ state, onChanged, onOpenChat, onPremium }: Props) {
   const [match, setMatch] = useState<{ id: number; user: Profile } | null>(null);
   const [compat, setCompat] = useState<Record<number, { score: number; reason: string } | "loading">>({});
   const [notice, setNotice] = useState("");
+  const [reporting, setReporting] = useState(false);
   const [dx, setDx] = useState(0);
   const drag = useRef<number | null>(null);
 
@@ -93,12 +95,14 @@ export function Feed({ state, onChanged, onOpenChat, onPremium }: Props) {
             }}
           >
             <Avatar user={card} className="card-photo" />
+            <button className="card-menu" onPointerDown={(e) => e.stopPropagation()} onClick={() => setReporting(true)}>⋯</button>
             {dx > 40 && <div className="stamp like">LIKE</div>}
             {dx < -40 && <div className="stamp nope">NOPE</div>}
             <div className="card-info">
               {card.superLikedMe && <div className="badge">⭐ Суперлайкнул(а) тебя</div>}
               <h3>
-                {card.name}, {card.age} {card.premium && <span title="Premium">✨</span>}
+                {card.name}, {card.age} {card.verified && <span className="verified" title="Подтверждён">✓</span>}{" "}
+                {card.premium && <span title="Premium">✨</span>}
               </h3>
               {card.city && <div className="muted">📍 {card.city}</div>}
               {card.bio && <p>{card.bio}</p>}
@@ -127,6 +131,19 @@ export function Feed({ state, onChanged, onOpenChat, onPremium }: Props) {
             <button className="round like" onClick={() => swipe("like")}>♥</button>
           </div>
         </>
+      )}
+
+      {reporting && card && (
+        <ReportSheet
+          targetId={card.id}
+          name={card.name}
+          onClose={() => setReporting(false)}
+          onDone={() => {
+            setReporting(false);
+            setCards((c) => c!.slice(1));
+            setNotice("Готово. Больше не покажем этого человека.");
+          }}
+        />
       )}
 
       {match && (

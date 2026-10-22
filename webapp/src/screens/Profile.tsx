@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { api, errorText, type MeResponse } from "../api";
 import { haptic } from "../tg";
+import { toJpeg } from "./image";
+import { Invite } from "./Invite";
+import { Verify } from "./Verify";
 
 interface Props {
   state: MeResponse;
@@ -14,17 +17,6 @@ const SUGGESTED_INTERESTS = [
   "концерты", "танцы", "кулинария", "вино", "горы", "море", "собаки", "кошки", "IT", "фотография",
   "выставки", "стендап", "игры", "театр",
 ];
-
-/** Сжимаем фото на клиенте до 1080px JPEG, чтобы не грузить сервер. */
-async function toJpeg(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 1080 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.85);
-}
 
 export function ProfileScreen({ state, onSaved, onPremium, onboarding }: Props) {
   const me = state.me;
@@ -97,6 +89,8 @@ export function ProfileScreen({ state, onSaved, onPremium, onboarding }: Props) 
         </div>
       )}
 
+      {!onboarding && <Invite invite={state.invite} />}
+
       <section>
         <label>Фото</label>
         <div className="photos">
@@ -114,6 +108,8 @@ export function ProfileScreen({ state, onSaved, onPremium, onboarding }: Props) 
           )}
         </div>
       </section>
+
+      {!onboarding && <Verify status={me.verifyStatus} hasPhotos={photos.length > 0} onChanged={onSaved} />}
 
       <section className="fields">
         <label>Имя<input value={form.name} onChange={(e) => set("name", e.target.value)} maxLength={40} /></label>

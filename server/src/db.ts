@@ -75,6 +75,23 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS blocks (
+  from_id INTEGER NOT NULL,
+  to_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (from_id, to_id)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  from_id INTEGER NOT NULL,
+  to_id INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  comment TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  UNIQUE (from_id, to_id)
+);
+
 CREATE TABLE IF NOT EXISTS ai_usage (
   user_id INTEGER NOT NULL,
   day TEXT NOT NULL,
@@ -82,6 +99,21 @@ CREATE TABLE IF NOT EXISTS ai_usage (
   PRIMARY KEY (user_id, day)
 );
 `);
+
+/** Колонки, добавленные после этапа 1: докатываем на существующие базы. */
+const userColumns: Record<string, string> = {
+  referred_by: "INTEGER",
+  referral_rewarded: "INTEGER NOT NULL DEFAULT 0",
+  banned: "INTEGER NOT NULL DEFAULT 0",
+  verify_status: "TEXT NOT NULL DEFAULT 'none'", // none | pending | verified | rejected
+  verify_gesture: "TEXT",
+  verify_selfie: "TEXT",
+  strikes: "INTEGER NOT NULL DEFAULT 0",
+};
+const existing = new Set((db.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map((c) => c.name));
+for (const [name, type] of Object.entries(userColumns)) {
+  if (!existing.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${type}`);
+}
 
 export interface UserRow {
   id: number;
@@ -102,6 +134,13 @@ export interface UserRow {
   boost_until: number;
   created_at: number;
   last_active: number;
+  referred_by: number | null;
+  referral_rewarded: number;
+  banned: number;
+  verify_status: "none" | "pending" | "verified" | "rejected";
+  verify_gesture: string | null;
+  verify_selfie: string | null;
+  strikes: number;
 }
 
 export const now = () => Date.now();
@@ -127,6 +166,7 @@ export function publicProfile(u: UserRow) {
     interests: JSON.parse(u.interests) as string[],
     photos: JSON.parse(u.photos) as string[],
     premium: isPremium(u),
+    verified: u.verify_status === "verified",
   };
 }
 
@@ -142,7 +182,19 @@ export function privateProfile(u: UserRow) {
     premiumUntil: u.premium_until,
     superLikes: u.super_likes,
     boostUntil: u.boost_until,
+    verifyStatus: u.verify_status,
   };
+}
+
+/** SQL-условие: пользователь u.id не заблокирован и не заблокировал :me, не забанен. */
+export const VISIBLE_TO_ME = `u.banned = 0
+  AND u.id NOT IN (SELECT to_id FROM blocks WHERE from_id = :me)
+  AND u.id NOT IN (SELECT from_id FROM blocks WHERE to_id = :me)`;
+
+export function isBlockedBetween(a: number, b: number) {
+  return Boolean(
+    db.prepare("SELECT 1 FROM blocks WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)").get(a, b, b, a),
+  );
 }
 
 export function pairKey(a: number, b: number): [number, number] {

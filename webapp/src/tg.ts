@@ -3,6 +3,7 @@ interface TelegramWebApp {
   colorScheme: "light" | "dark";
   ready(): void;
   expand(): void;
+  openTelegramLink(url: string): void;
   openInvoice(url: string, cb?: (status: "paid" | "cancelled" | "failed" | "pending") => void): void;
   HapticFeedback?: {
     impactOccurred(style: "light" | "medium" | "heavy"): void;

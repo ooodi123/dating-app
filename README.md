@@ -25,6 +25,10 @@ cd ../webapp && npm install && npm run dev   # http://localhost:5173/?dev=1
 
 ## Запуск в Telegram
 
+Пошагово для Bothost — [docs/DEPLOY_BOTHOST.md](docs/DEPLOY_BOTHOST.md). На любом другом хостинге:
+в корне `npm install` (соберёт всё) и `npm start`.
+
+
 1. Создайте бота у [@BotFather](https://t.me/BotFather) и положите токен в `BOT_TOKEN` (только в `.env`
    или секреты хостинга — не в код и не в чат).
 2. Задеплойте на сервер с HTTPS: `cd webapp && npm run build`, затем `cd server && npm run build && npm start`.
@@ -32,9 +36,18 @@ cd ../webapp && npm install && npm run dev   # http://localhost:5173/?dev=1
 3. В @BotFather: `/newapp` (или Menu Button) → тот же URL.
 4. Для AI добавьте `ANTHROPIC_API_KEY`. Модель задаётся `AI_MODEL` (по умолчанию `claude-opus-5-5`;
    для экономии на большом трафике можно поставить `claude-haiku-5-5`).
+5. Укажите свой Telegram id в `ADMIN_IDS` (узнать можно у @userinfobot): туда придут жалобы и заявки
+   на верификацию с кнопками «Забанить» / «Подтвердить».
 
 Оплата Stars не требует платёжного провайдера: бот создаёт invoice link с валютой `XTR`, мини-апп открывает
 его через `Telegram.WebApp.openInvoice`, а начисление происходит по `successful_payment` в боте.
+
+## Модерация и доверие
+- AI проверяет текст анкеты, фото и подозрительные сообщения. Без `ANTHROPIC_API_KEY` проверки
+  пропускаются, и остаются только жалобы и модераторы.
+- Верификация: селфи с жестом → AI-проверка → решение модератора в боте. Если `ADMIN_IDS` пуст,
+  достаточно AI-проверки.
+- Селфи хранятся в `SELFIES_DIR` и не раздаются наружу, их видят только модераторы.
 
 ## Безопасность
 - Каждый запрос подписан `initData` Telegram; сервер проверяет HMAC и срок (24 ч).

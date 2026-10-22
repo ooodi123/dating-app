@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorText, type Message, type Profile } from "../api";
 import { Avatar } from "./Avatar";
+import { ReportSheet } from "./ReportSheet";
 
 interface Props {
   matchId: number;
@@ -23,6 +24,7 @@ export function Chat({ matchId, meId, aiEnabled, onBack }: Props) {
   const [text, setText] = useState("");
   const [openers, setOpeners] = useState<string[] | "loading" | null>(null);
   const [notice, setNotice] = useState("");
+  const [reporting, setReporting] = useState(false);
   const lastId = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -51,7 +53,14 @@ export function Chat({ matchId, meId, aiEnabled, onBack }: Props) {
     const t = text.trim();
     if (!t) return;
     setText("");
-    const { id } = await api<{ id: number }>(`/api/matches/${matchId}/messages`, { method: "POST", body: { text: t } });
+    let id: number;
+    try {
+      ({ id } = await api<{ id: number }>(`/api/matches/${matchId}/messages`, { method: "POST", body: { text: t } }));
+    } catch (e) {
+      setText(t);
+      setNotice(errorText(e));
+      return;
+    }
     lastId.current = Math.max(lastId.current, id);
     setMessages((m) => merge(m, [{ id, senderId: meId, text: t, createdAt: Date.now() }]));
   }
@@ -71,7 +80,13 @@ export function Chat({ matchId, meId, aiEnabled, onBack }: Props) {
     <div className="chat">
       <div className="chat-head">
         <button className="link" onClick={onBack}>← Назад</button>
-        {user && <><Avatar user={user} className="small" /><b>{user.name}</b></>}
+        {user && (
+          <>
+            <Avatar user={user} className="small" />
+            <b>{user.name} {user.verified && <span className="verified">✓</span>}</b>
+            <button className="link push-right" onClick={() => setReporting(true)}>⋯</button>
+          </>
+        )}
       </div>
       <div className="chat-body">
         {messages.length === 0 && <p className="muted center">Начните разговор! Не знаешь, с чего начать? Спроси AI ✨</p>}
@@ -87,6 +102,9 @@ export function Chat({ matchId, meId, aiEnabled, onBack }: Props) {
             <button key={o} className="chip" onClick={() => { setText(o); setOpeners(null); }}>{o}</button>
           ))}
         </div>
+      )}
+      {reporting && user && (
+        <ReportSheet targetId={user.id} name={user.name} onClose={() => setReporting(false)} onDone={onBack} />
       )}
       <div className="composer">
         {aiEnabled && (

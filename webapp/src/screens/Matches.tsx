@@ -22,7 +22,7 @@ export function Matches({ onOpen }: { onOpen: (id: number) => void }) {
         <button key={m.id} className="row" onClick={() => onOpen(m.id)}>
           <Avatar user={m.user} className="small" />
           <div className="row-text">
-            <b>{m.user.name}</b>
+            <b>{m.user.name} {m.user.verified && <span className="verified">✓</span>}</b>
             <span className="muted small">{m.lastText ?? "Новый мэтч — напиши первым(ой)!"}</span>
           </div>
         </button>

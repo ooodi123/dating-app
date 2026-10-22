@@ -103,3 +103,11 @@ textarea { resize: vertical; }
 .ai-box { margin-top: 10px; padding: 12px; border-radius: 14px; background: var(--bg2); display: grid; gap: 8px; }
 .ai-box textarea { background: var(--bg); }
 .suggestion { text-align: left; background: var(--bg); border: 1px dashed var(--accent); border-radius: 12px; padding: 10px; }
+
+.btn.secondary { background: var(--bg); color: var(--accent); border: 1px solid var(--accent); }
+.btn.disabled { opacity: .6; pointer-events: none; }
+label.btn { display: inline-block; text-align: center; cursor: pointer; }
+.verified { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: #2a9df4; color: #fff; font-size: 11px; vertical-align: middle; }
+.card-menu { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border-radius: 50%; border: none; background: rgba(0,0,0,.4); color: #fff; font-size: 20px; line-height: 1; }
+.push-right { margin-left: auto; font-size: 22px; }
+.profile .ai-box { margin: 16px 0; }
