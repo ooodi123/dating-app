@@ -1,0 +1,15 @@
+{
+  "name": "dating-app",
+  "private": true,
+  "type": "module",
+  "description": "Telegram Mini App для знакомств: сервер + мини-апп в одном процессе",
+  "main": "start.js",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "postinstall": "npm run setup",
+    "setup": "npm ci --prefix server --include=dev && npm ci --prefix webapp --include=dev && npm run build --prefix webapp && npm run build --prefix server",
+    "start": "node start.js"
+  }
+}

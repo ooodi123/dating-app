@@ -25,6 +25,10 @@ cd ../webapp && npm install && npm run dev   # http://localhost:5173/?dev=1
 
 ## Запуск в Telegram
 
+Пошагово для Bothost — [docs/DEPLOY_BOTHOST.md](docs/DEPLOY_BOTHOST.md). На любом другом хостинге:
+в корне `npm install` (соберёт всё) и `npm start`.
+
+
 1. Создайте бота у [@BotFather](https://t.me/BotFather) и положите токен в `BOT_TOKEN` (только в `.env`
    или секреты хостинга — не в код и не в чат).
 2. Задеплойте на сервер с HTTPS: `cd webapp && npm run build`, затем `cd server && npm run build && npm start`.
