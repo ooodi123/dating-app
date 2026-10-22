@@ -1,3 +1,4 @@
+import { config } from "./config.js";
 import { db, getUser, now } from "./db.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -6,7 +7,9 @@ const DAY = 24 * 60 * 60 * 1000;
 export const PRODUCTS = {
   premium_month: {
     title: "Premium на 30 дней",
-    description: "Безлимит лайков, кто тебя лайкнул, 5 суперлайков и больше AI-подсказок",
+    description: config.aiEnabled
+      ? "Безлимит лайков, кто тебя лайкнул, 5 суперлайков и больше AI-подсказок"
+      : "Безлимит лайков, кто тебя лайкнул и 5 суперлайков",
     stars: 299,
   },
   super_likes_5: {
