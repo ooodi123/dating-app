@@ -111,6 +111,8 @@ export async function routes(app: FastifyInstance) {
     limits: {
       likesLeft: isPremium(req.user) ? null : Math.max(0, config.freeDailyLikes - likesToday(req.user.id)),
       aiEnabled: config.aiEnabled,
+      // Без AI верификацию можно проводить только вручную, через модераторов
+      verifyEnabled: config.aiEnabled || config.adminIds.length > 0,
     },
     products: PRODUCTS,
     invite: {

@@ -109,7 +109,7 @@ export function ProfileScreen({ state, onSaved, onPremium, onboarding }: Props) 
         </div>
       </section>
 
-      {!onboarding && <Verify status={me.verifyStatus} hasPhotos={photos.length > 0} onChanged={onSaved} />}
+      {!onboarding && state.limits.verifyEnabled && <Verify status={me.verifyStatus} hasPhotos={photos.length > 0} onChanged={onSaved} />}
 
       <section className="fields">
         <label>Имя<input value={form.name} onChange={(e) => set("name", e.target.value)} maxLength={40} /></label>

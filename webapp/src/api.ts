@@ -37,7 +37,7 @@ export interface Product {
 
 export interface MeResponse {
   me: Me;
-  limits: { likesLeft: number | null; aiEnabled: boolean };
+  limits: { likesLeft: number | null; aiEnabled: boolean; verifyEnabled: boolean };
   products: Record<string, Product>;
   invite: { link: string | null; friends: number; superLikesBonus: number; premiumEvery: number; premiumDays: number };
 }

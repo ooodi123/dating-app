@@ -11,7 +11,12 @@ const app = Fastify({ logger: true });
 
 await app.register(fastifyStatic, { root: resolve(config.uploadsDir), prefix: "/uploads/" });
 
-app.get("/health", async () => ({ ok: true, bot: Boolean(config.botToken), webAppUrl: config.webAppUrl || null }));
+app.get("/health", async () => ({
+  ok: true,
+  bot: Boolean(config.botToken),
+  webAppUrl: config.webAppUrl || null,
+  ai: config.aiEnabled ? `${config.ai.provider}/${config.aiModel}` : null,
+}));
 
 // В продакшене сервер отдаёт и собранный мини-апп (путь от файла, а не от рабочей папки:
 // и src/index.ts, и dist/index.js лежат на два уровня ниже корня репозитория)
