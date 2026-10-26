@@ -2,8 +2,14 @@ import "dotenv/config";
 import { join } from "node:path";
 
 const env = process.env;
-// Хостинги (например, Bothost) передают адрес приложения как DOMAIN без схемы
-const domainUrl = env.DOMAIN ? (env.DOMAIN.startsWith("http") ? env.DOMAIN : `https://${env.DOMAIN}`) : "";
+// Хостинги (например, Bothost) передают адрес приложения как DOMAIN без схемы.
+// Telegram открывает мини-апп только по https, поэтому http-адреса не принимаем.
+const httpsUrl = (raw = "") => {
+  const url = raw.trim().replace(/\/+$/, "");
+  if (!url) return "";
+  if (url.startsWith("https://")) return url;
+  return url.includes("://") ? "" : `https://${url}`;
+};
 // Папка для базы и файлов. На хостинге её стоит направить на постоянный диск (volume)
 const dataDir = env.DATA_DIR || "data";
 
@@ -42,7 +48,7 @@ const ai = resolveAi();
 
 export const config = {
   botToken: env.BOT_TOKEN || env.TELEGRAM_BOT_TOKEN || env.API_TOKEN || "",
-  webAppUrl: env.WEBAPP_URL || domainUrl,
+  webAppUrl: httpsUrl(env.WEBAPP_URL) || httpsUrl(env.DOMAIN),
   port: Number(env.PORT || 3000),
   dbPath: env.DB_PATH || join(dataDir, "app.db"),
   uploadsDir: env.UPLOADS_DIR || join(dataDir, "uploads"),

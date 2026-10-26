@@ -8,7 +8,12 @@ import { upsertUser } from "./auth.js";
 
 export const bot = new Bot(config.botToken || "missing-token");
 
-const openApp = (text = "Открыть приложение 💘") => new InlineKeyboard().webApp(text, config.webAppUrl);
+// Ошибка в одном обработчике не должна останавливать бота
+bot.catch((err) => console.error(`Ошибка при обработке update ${err.ctx.update.update_id}:`, err.error));
+
+// Без адреса мини-аппа кнопку не показываем: Telegram отклонит сообщение с пустой ссылкой
+const openApp = (text = "Открыть приложение 💘") =>
+  config.webAppUrl ? new InlineKeyboard().webApp(text, config.webAppUrl) : undefined;
 const isAdmin = (id: number | undefined) => id !== undefined && config.adminIds.includes(id);
 
 bot.command("start", async (ctx) => {
@@ -22,7 +27,8 @@ bot.command("start", async (ctx) => {
     "Привет! Здесь знакомятся по-настоящему 💘\n\n" +
       "Заполни анкету за минуту, а AI поможет написать «О себе», подскажет, насколько вы совпадаете, " +
       "и придумает первое сообщение после мэтча." +
-      (ref ? "\n\nТебя пригласил друг — после заполнения анкеты вы оба получите суперлайки ⭐" : ""),
+      (ref ? "\n\nТебя пригласил друг — после заполнения анкеты вы оба получите суперлайки ⭐" : "") +
+      (config.webAppUrl ? "" : "\n\nПриложение скоро откроется — мы заканчиваем настройку."),
     { reply_markup: openApp() },
   );
 });
