@@ -1,8 +1,8 @@
 // Точка входа для хостинга (Bothost и др.): `npm install` собирает всё через postinstall,
 // затем запускается этот файл.
-const [major, minor] = process.versions.node.split(".").map(Number);
-if (major < 22 || (major === 22 && minor < 5)) {
-  console.error(`Нужен Node.js 22.5 или новее (встроенный SQLite), сейчас ${process.version}. Выберите версию Node в настройках хостинга.`);
+const [major] = process.versions.node.split(".").map(Number);
+if (major < 20) {
+  console.error(`Нужен Node.js 20 или новее, сейчас ${process.version}. Выберите версию Node в настройках хостинга.`);
   process.exit(1);
 }
 
