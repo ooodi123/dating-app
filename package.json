@@ -9,7 +9,7 @@
   },
   "scripts": {
     "postinstall": "node -e \"if (require('fs').existsSync('server/package.json')) require('child_process').execSync('npm run setup', { stdio: 'inherit' }); else console.log('Исходники ещё не скопированы: сборка пройдёт при первом запуске start.js');\"",
-    "setup": "npm run install:server && npm run install:webapp && npm run build --prefix webapp && npm run build --prefix server",
+    "setup": "npm run install:server && npm run install:webapp && npm run build --prefix webapp && npm run build --prefix server && node build-stamp.js",
     "install:server": "npm ci --prefix server --include=dev || npm install --prefix server --include=dev",
     "install:webapp": "npm ci --prefix webapp --include=dev || npm install --prefix webapp --include=dev",
     "start": "node start.js"

@@ -6,12 +6,14 @@ if (major < 20) {
   process.exit(1);
 }
 
-const { existsSync } = await import("node:fs");
-if (!existsSync(new URL("./server/dist/index.js", import.meta.url))) {
-  // Хостинг не запустил npm install в корне — собираем сами (один раз, займёт пару минут)
+const { builtHash, sourceHash } = await import("./build-stamp.js");
+const version = sourceHash();
+if (builtHash() !== version) {
+  // Сборки нет или она от старого кода (хостинг не запустил npm install) — собираем сами, займёт пару минут
   console.log("Сборка приложения…");
   const { execSync } = await import("node:child_process");
   execSync("npm run setup", { stdio: "inherit", cwd: new URL(".", import.meta.url) });
 }
+console.log(`Версия кода: ${version}`);
 
 await import("./server/dist/index.js");
