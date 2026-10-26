@@ -1,10 +1,11 @@
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 
 mkdirSync(dirname(config.dbPath), { recursive: true });
-export const db = new DatabaseSync(config.dbPath);
+// better-sqlite3 вместо встроенного node:sqlite: работает на Node 20+, а не только 22.5+
+export const db = new Database(config.dbPath);
 
 db.exec(`
 PRAGMA journal_mode = WAL;

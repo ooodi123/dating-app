@@ -4,13 +4,13 @@
 Продуктовый план и этапы — в [docs/PLAN.md](docs/PLAN.md).
 
 ```
-server/   Node.js + TypeScript: Fastify API, бот на grammY, SQLite (node:sqlite), Claude API
+server/   Node.js + TypeScript: Fastify API, бот на grammY, SQLite (better-sqlite3), Claude API
 webapp/   React + Vite: сам мини-апп (лента, лайки, чаты, профиль, покупки)
 ```
 
 ## Быстрый старт локально (без Telegram)
 
-Нужен Node.js 22+.
+Нужен Node.js 20+.
 
 ```bash
 cd server && npm install && cp .env.example .env
